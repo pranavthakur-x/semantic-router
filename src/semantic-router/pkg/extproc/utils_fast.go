@@ -35,17 +35,18 @@ type FastExtractResult struct {
 	ContextHasNonText      bool
 
 	// Conversation-shape fields for the conversation signal family.
-	HasDeveloperMessage     bool
-	UserMessageCount        int
-	AssistantMessageCount   int
-	SystemMessageCount      int
-	ToolMessageCount        int
-	ToolDefinitionCount     int
-	AssistantToolCallCount  int
-	ToolResultCount         int
-	LastMessageRole         string
-	LastMessageToolResult   bool
-	LastUserAfterToolResult bool
+	HasDeveloperMessage       bool
+	UserMessageCount          int
+	AssistantMessageCount     int
+	SystemMessageCount        int
+	ToolMessageCount          int
+	ToolDefinitionCount       int
+	AssistantToolCallCount    int
+	ToolResultCount           int
+	LastMessageRole           string
+	LastMessageToolResult     bool
+	LastUserAfterToolResult   bool
+	LastSystemAfterToolResult bool
 }
 
 // extractContentFast extracts model, stream, message content, and the first
@@ -176,13 +177,17 @@ func populateFastExtractMessages(messages gjson.Result, result *FastExtractResul
 }
 
 func consumeFastExtractMessage(msg gjson.Result, result *FastExtractResult) {
-	previousWasToolResult := result.LastMessageToolResult || result.LastMessageRole == "tool"
+	previousWasToolResult := result.LastMessageToolResult ||
+		result.LastMessageRole == "tool" ||
+		result.LastSystemAfterToolResult
+	previousWasUserAfterTool := result.LastUserAfterToolResult
 	role := msg.Get("role").String()
 	content := msg.Get("content")
 	text := extractTextFromContent(content)
 	result.LastMessageRole = role
 	result.LastMessageToolResult = false
 	result.LastUserAfterToolResult = false
+	result.LastSystemAfterToolResult = false
 
 	switch role {
 	case "user":
@@ -191,6 +196,8 @@ func consumeFastExtractMessage(msg gjson.Result, result *FastExtractResult) {
 		recordFastExtractUserMessage(result, text, content)
 	case "system":
 		result.SystemMessageCount++
+		result.LastSystemAfterToolResult = previousWasToolResult
+		result.LastUserAfterToolResult = previousWasUserAfterTool
 		recordFastExtractNonUserMessage(result, role, text)
 	case "assistant":
 		result.AssistantMessageCount++
@@ -198,6 +205,8 @@ func consumeFastExtractMessage(msg gjson.Result, result *FastExtractResult) {
 		countAssistantToolCalls(msg, result)
 	case "developer":
 		result.HasDeveloperMessage = true
+		result.LastSystemAfterToolResult = previousWasToolResult
+		result.LastUserAfterToolResult = previousWasUserAfterTool
 		recordFastExtractNonUserMessage(result, role, text)
 	case "tool":
 		result.ToolMessageCount++

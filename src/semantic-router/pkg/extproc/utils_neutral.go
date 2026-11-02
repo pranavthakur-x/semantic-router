@@ -128,7 +128,10 @@ func extractSemanticRequestSignalsWith(request *llmprotocol.Request, selector *r
 
 //nolint:gocognit,cyclop,funlen // Signal extraction walks the complete neutral message content vocabulary.
 func consumeSemanticMessage(result *requestSignalSnapshot, message llmprotocol.Message) {
-	previousWasTool := result.LastMessageToolResult || result.LastMessageRole == string(llmprotocol.RoleTool)
+	previousWasTool := result.LastMessageToolResult ||
+		result.LastMessageRole == string(llmprotocol.RoleTool) ||
+		result.LastSystemAfterToolResult
+	previousWasUserAfterTool := result.LastUserAfterToolResult
 	role := string(message.Role)
 	text := semanticText(message.Content)
 	result.LastMessageRole = role
@@ -136,6 +139,7 @@ func consumeSemanticMessage(result *requestSignalSnapshot, message llmprotocol.M
 	result.LastMessageFlowToolResult = false
 	result.LastAssistantToolCall = false
 	result.LastUserAfterToolResult = false
+	result.LastSystemAfterToolResult = false
 	switch message.Role {
 	case llmprotocol.RoleUser:
 		result.UserMessageCount++
@@ -159,9 +163,13 @@ func consumeSemanticMessage(result *requestSignalSnapshot, message llmprotocol.M
 		}
 	case llmprotocol.RoleSystem:
 		result.SystemMessageCount++
+		result.LastSystemAfterToolResult = previousWasTool
+		result.LastUserAfterToolResult = previousWasUserAfterTool
 		recordNonUserSignalMessage(result, role, text)
 	case llmprotocol.RoleDeveloper:
 		result.HasDeveloperMessage = true
+		result.LastSystemAfterToolResult = previousWasTool
+		result.LastUserAfterToolResult = previousWasUserAfterTool
 		recordNonUserSignalMessage(result, role, text)
 	case llmprotocol.RoleTool:
 		result.ToolMessageCount++

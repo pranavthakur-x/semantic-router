@@ -26,6 +26,18 @@ type ConversationFacts struct {
 	LastMessageFlowToolResult bool
 	LastAssistantToolCall     bool
 	LastUserAfterToolResult   bool
+	LastSystemAfterToolResult bool
+}
+
+// HasActiveToolLoop reports whether the conversation tail is mid-tool-loop:
+// a pending assistant tool call, a trailing tool result, or an adjacent user,
+// system, or developer continuation notice following a tool result.
+func (facts ConversationFacts) HasActiveToolLoop() bool {
+	return facts.LastMessageToolResult ||
+		facts.LastMessageRole == "tool" ||
+		facts.LastUserAfterToolResult ||
+		facts.LastSystemAfterToolResult ||
+		facts.LastAssistantToolCall
 }
 
 func (c *Classifier) evaluateConversationSignal(
@@ -127,13 +139,7 @@ func conversationBoolCount(value bool) int {
 }
 
 func activeToolLoopCount(facts ConversationFacts) int {
-	if facts.LastMessageToolResult ||
-		facts.LastMessageRole == "tool" ||
-		facts.LastUserAfterToolResult ||
-		facts.LastAssistantToolCall {
-		return 1
-	}
-	return 0
+	return conversationBoolCount(facts.HasActiveToolLoop())
 }
 
 func countMessagesByRole(role string, facts ConversationFacts) int {

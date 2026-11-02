@@ -322,10 +322,7 @@ func nonPortableContextBinding(reqCtx *RequestContext) (bool, string) {
 }
 
 func conversationFactsIndicateActiveToolLoop(facts classification.ConversationFacts) bool {
-	return facts.LastMessageToolResult ||
-		facts.LastMessageRole == "tool" ||
-		facts.LastUserAfterToolResult ||
-		facts.LastAssistantToolCall
+	return facts.HasActiveToolLoop()
 }
 
 func (r *OpenAIRouter) agenticCacheWarmth(

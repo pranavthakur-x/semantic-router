@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/classification"
+	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/config"
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/llmprotocol"
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/routinginput"
 )
@@ -76,6 +77,135 @@ func TestExtractSignalConversationHistoryMarksUserAfterToolResult(t *testing.T) 
 	assert.Equal(t, "user", history.lastMessageRole)
 	assert.False(t, history.lastMessageToolResult)
 	assert.True(t, history.lastUserAfterToolResult)
+}
+
+func TestExtractSignalConversationHistoryPreservesToolLoopAcrossSystemAndDeveloperNotices(t *testing.T) {
+	router := &OpenAIRouter{Config: &config.RouterConfig{}}
+	tests := []struct {
+		name                  string
+		messages              []llmprotocol.Message
+		wantLastRole          string
+		wantSystemAfterTool   bool
+		wantUserAfterTool     bool
+		wantFlowToolResult    bool
+		wantActiveToolLoop    bool
+		wantHasAssistantReply bool
+	}{
+		{
+			name: "tool_then_system_notice",
+			messages: []llmprotocol.Message{
+				{Role: llmprotocol.RoleUser, Content: textBlocks("Run uname -m")},
+				neutralAssistantToolCalls("Bash"),
+				neutralToolResult("call-Bash", "aarch64"),
+				{Role: llmprotocol.RoleSystem, Content: textBlocks("<system-reminder><total_tokens>14984549</total_tokens></system-reminder>")},
+			},
+			wantLastRole:        "system",
+			wantSystemAfterTool: true,
+			wantActiveToolLoop:  true,
+		},
+		{
+			name: "tool_then_developer_and_system_notices",
+			messages: []llmprotocol.Message{
+				{Role: llmprotocol.RoleUser, Content: textBlocks("Run uname -m")},
+				neutralAssistantToolCalls("Bash"),
+				neutralToolResult("call-Bash", "aarch64"),
+				{Role: llmprotocol.RoleDeveloper, Content: textBlocks("Policy reminder")},
+				{Role: llmprotocol.RoleSystem, Content: textBlocks("# Environment update")},
+			},
+			wantLastRole:        "system",
+			wantSystemAfterTool: true,
+			wantActiveToolLoop:  true,
+		},
+		{
+			name: "tool_then_user_text_then_system_notice",
+			messages: []llmprotocol.Message{
+				{Role: llmprotocol.RoleUser, Content: textBlocks("Run uname -m")},
+				neutralAssistantToolCalls("Bash"),
+				neutralToolResult("call-Bash", "aarch64"),
+				{Role: llmprotocol.RoleUser, Content: textBlocks("<system-reminder>file modified</system-reminder>")},
+				{Role: llmprotocol.RoleSystem, Content: textBlocks("<system-reminder><total_tokens>14984549</total_tokens></system-reminder>")},
+			},
+			wantLastRole:       "system",
+			wantUserAfterTool:  true,
+			wantActiveToolLoop: true,
+		},
+		{
+			name: "tool_then_system_notice_then_user_continuation",
+			messages: []llmprotocol.Message{
+				{Role: llmprotocol.RoleUser, Content: textBlocks("Run uname -m")},
+				neutralAssistantToolCalls("Bash"),
+				neutralToolResult("call-Bash", "aarch64"),
+				{Role: llmprotocol.RoleSystem, Content: textBlocks("# Environment update")},
+				{Role: llmprotocol.RoleUser, Content: textBlocks("Now fix the build.")},
+			},
+			wantLastRole:       "user",
+			wantUserAfterTool:  true,
+			wantActiveToolLoop: true,
+		},
+		{
+			name: "initial_user_then_system_notice_is_not_tool_loop",
+			messages: []llmprotocol.Message{
+				{Role: llmprotocol.RoleUser, Content: textBlocks("Run uname -m")},
+				{Role: llmprotocol.RoleSystem, Content: textBlocks("<system-reminder><total_tokens>14999000</total_tokens></system-reminder>")},
+			},
+			wantLastRole:       "system",
+			wantActiveToolLoop: false,
+		},
+		{
+			name: "completed_run_assistant_answer_clears_tool_loop_before_next_system_notice",
+			messages: []llmprotocol.Message{
+				{Role: llmprotocol.RoleUser, Content: textBlocks("Run uname -m")},
+				neutralAssistantToolCalls("Bash"),
+				neutralToolResult("call-Bash", "aarch64"),
+				{Role: llmprotocol.RoleSystem, Content: textBlocks("<system-reminder>tokens</system-reminder>")},
+				{Role: llmprotocol.RoleAssistant, Content: textBlocks("The machine architecture is aarch64.")},
+				{Role: llmprotocol.RoleUser, Content: textBlocks("Now check the kernel version.")},
+				{Role: llmprotocol.RoleSystem, Content: textBlocks("<system-reminder>tokens</system-reminder>")},
+			},
+			wantLastRole:       "system",
+			wantActiveToolLoop: false,
+		},
+		{
+			name: "second_user_turn_after_system_notice_clears_tool_loop",
+			messages: []llmprotocol.Message{
+				{Role: llmprotocol.RoleUser, Content: textBlocks("Run uname -m")},
+				neutralAssistantToolCalls("Bash"),
+				neutralToolResult("call-Bash", "aarch64"),
+				{Role: llmprotocol.RoleUser, Content: textBlocks("Continue")},
+				{Role: llmprotocol.RoleSystem, Content: textBlocks("<system-reminder>tokens</system-reminder>")},
+				{Role: llmprotocol.RoleUser, Content: textBlocks("Separate follow-up")},
+			},
+			wantLastRole:       "user",
+			wantActiveToolLoop: false,
+		},
+		{
+			name: "flow_tool_result_stays_strict_trailing_on_system_notice",
+			messages: []llmprotocol.Message{
+				{Role: llmprotocol.RoleUser, Content: textBlocks("run workflow")},
+				neutralToolResult("flowtool_deadbeef__call_1", "done"),
+				{Role: llmprotocol.RoleSystem, Content: textBlocks("<system-reminder>tokens</system-reminder>")},
+			},
+			wantLastRole:        "system",
+			wantSystemAfterTool: true,
+			wantFlowToolResult:  false,
+			wantActiveToolLoop:  true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			history := extractSignalConversationHistory(&llmprotocol.Request{Messages: tc.messages})
+			input := router.prepareSignalEvaluationInput(history)
+			facts := input.conversationFacts
+			assert.Equal(t, tc.wantLastRole, facts.LastMessageRole)
+			assert.False(t, facts.LastMessageToolResult)
+			assert.Equal(t, tc.wantSystemAfterTool, facts.LastSystemAfterToolResult)
+			assert.Equal(t, tc.wantUserAfterTool, facts.LastUserAfterToolResult)
+			assert.Equal(t, tc.wantFlowToolResult, facts.LastMessageFlowToolResult)
+			assert.Equal(t, tc.wantActiveToolLoop, conversationFactsIndicateActiveToolLoop(facts))
+			assert.Equal(t, tc.wantHasAssistantReply, input.hasAssistantReply)
+		})
+	}
 }
 
 func TestExtractSignalConversationHistoryBoundsPendingToolCallToTail(t *testing.T) {

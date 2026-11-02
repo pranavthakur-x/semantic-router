@@ -53,6 +53,7 @@ type requestSignalSnapshot struct {
 	LastMessageFlowToolResult bool
 	LastAssistantToolCall     bool
 	LastUserAfterToolResult   bool
+	LastSystemAfterToolResult bool
 
 	RoutingInput routinginput.Outcome
 }
