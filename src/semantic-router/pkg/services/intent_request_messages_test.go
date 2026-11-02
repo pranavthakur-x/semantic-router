@@ -120,6 +120,105 @@ func TestIntentRequestResolveSignalInput_LastUserAfterToolResultRequiresAdjacenc
 		"an older tool result must not mark a non-adjacent user turn")
 }
 
+func TestIntentRequestResolveSignalInput_SystemAfterToolResultPreservesActiveToolLoop(t *testing.T) {
+	toolCall := []json.RawMessage{json.RawMessage(`{"id":"call-1"}`)}
+	tests := []struct {
+		name                string
+		messages            []IntentMessage
+		wantLastRole        string
+		wantSystemAfterTool bool
+		wantUserAfterTool   bool
+		wantActiveToolLoop  bool
+	}{
+		{
+			name: "tool_then_system_notice",
+			messages: []IntentMessage{
+				{Role: "user", Content: mustMessageContent(t, "Run uname -m")},
+				{Role: "assistant", Content: mustMessageContent(t, nil), ToolCalls: toolCall},
+				{Role: "tool", ToolCallID: "call-1", Content: mustMessageContent(t, "aarch64")},
+				{Role: "system", Content: mustMessageContent(t, "<system-reminder><total_tokens>14984549</total_tokens></system-reminder>")},
+			},
+			wantLastRole:        "system",
+			wantSystemAfterTool: true,
+			wantActiveToolLoop:  true,
+		},
+		{
+			name: "tool_then_developer_then_user",
+			messages: []IntentMessage{
+				{Role: "user", Content: mustMessageContent(t, "Run uname -m")},
+				{Role: "assistant", Content: mustMessageContent(t, nil), ToolCalls: toolCall},
+				{Role: "tool", ToolCallID: "call-1", Content: mustMessageContent(t, "aarch64")},
+				{Role: "developer", Content: mustMessageContent(t, "# Environment update")},
+				{Role: "user", Content: mustMessageContent(t, "Now fix it.")},
+			},
+			wantLastRole:       "user",
+			wantUserAfterTool:  true,
+			wantActiveToolLoop: true,
+		},
+		{
+			name: "tool_then_user_then_system",
+			messages: []IntentMessage{
+				{Role: "user", Content: mustMessageContent(t, "Run uname -m")},
+				{Role: "assistant", Content: mustMessageContent(t, nil), ToolCalls: toolCall},
+				{Role: "tool", ToolCallID: "call-1", Content: mustMessageContent(t, "aarch64")},
+				{Role: "user", Content: mustMessageContent(t, "<system-reminder>file modified</system-reminder>")},
+				{Role: "system", Content: mustMessageContent(t, "<system-reminder>tokens</system-reminder>")},
+			},
+			wantLastRole:       "system",
+			wantUserAfterTool:  true,
+			wantActiveToolLoop: true,
+		},
+		{
+			name: "user_then_system_without_tool",
+			messages: []IntentMessage{
+				{Role: "user", Content: mustMessageContent(t, "Run uname -m")},
+				{Role: "system", Content: mustMessageContent(t, "<system-reminder>tokens</system-reminder>")},
+			},
+			wantLastRole:       "system",
+			wantActiveToolLoop: false,
+		},
+		{
+			name: "second_user_turn_after_system_notice_clears_tool_loop",
+			messages: []IntentMessage{
+				{Role: "user", Content: mustMessageContent(t, "Run uname -m")},
+				{Role: "assistant", Content: mustMessageContent(t, nil), ToolCalls: toolCall},
+				{Role: "tool", ToolCallID: "call-1", Content: mustMessageContent(t, "aarch64")},
+				{Role: "user", Content: mustMessageContent(t, "Continue")},
+				{Role: "system", Content: mustMessageContent(t, "<system-reminder>tokens</system-reminder>")},
+				{Role: "user", Content: mustMessageContent(t, "New turn")},
+			},
+			wantLastRole:       "user",
+			wantActiveToolLoop: false,
+		},
+		{
+			name: "completed_run_assistant_then_system",
+			messages: []IntentMessage{
+				{Role: "user", Content: mustMessageContent(t, "Run uname -m")},
+				{Role: "assistant", Content: mustMessageContent(t, nil), ToolCalls: toolCall},
+				{Role: "tool", ToolCallID: "call-1", Content: mustMessageContent(t, "aarch64")},
+				{Role: "system", Content: mustMessageContent(t, "<system-reminder>tokens</system-reminder>")},
+				{Role: "assistant", Content: mustMessageContent(t, "Done.")},
+				{Role: "system", Content: mustMessageContent(t, "<system-reminder>tokens</system-reminder>")},
+			},
+			wantLastRole:       "system",
+			wantActiveToolLoop: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			input, err := (IntentRequest{Messages: tc.messages}).resolveSignalInput()
+			require.NoError(t, err)
+			facts := input.conversationFacts
+			assert.Equal(t, tc.wantLastRole, facts.LastMessageRole)
+			assert.False(t, facts.LastMessageToolResult)
+			assert.Equal(t, tc.wantSystemAfterTool, facts.LastSystemAfterToolResult)
+			assert.Equal(t, tc.wantUserAfterTool, facts.LastUserAfterToolResult)
+			assert.Equal(t, tc.wantActiveToolLoop, facts.HasActiveToolLoop())
+		})
+	}
+}
+
 func TestIntentRequestResolveSignalInput_PendingAssistantToolCallIsNotToolResult(t *testing.T) {
 	req := IntentRequest{
 		Messages: []IntentMessage{

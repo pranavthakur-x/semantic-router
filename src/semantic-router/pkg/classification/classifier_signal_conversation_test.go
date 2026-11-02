@@ -235,6 +235,7 @@ func TestConversation_ActiveToolLoopCount(t *testing.T) {
 		{LastMessageToolResult: true},
 		{LastMessageRole: "tool"},
 		{LastUserAfterToolResult: true},
+		{LastSystemAfterToolResult: true},
 		{LastAssistantToolCall: true},
 	}
 	for i, facts := range activeCases {
@@ -260,6 +261,19 @@ func TestConversation_ActiveToolLoopCount(t *testing.T) {
 	}
 	if conversationPredicateMatches(rule, val) {
 		t.Fatal("completed prior run should not match active_tool_loop")
+	}
+
+	completedPriorRunWithSystemNotice := ConversationFacts{
+		LastMessageRole:           "system",
+		AssistantToolCallCount:    1,
+		ToolResultCount:           1,
+		LastMessageToolResult:     false,
+		LastUserAfterToolResult:   false,
+		LastSystemAfterToolResult: false,
+	}
+	val = resolveConversationValue(rule.Feature, completedPriorRunWithSystemNotice)
+	if val != 0.0 || conversationPredicateMatches(rule, val) {
+		t.Fatal("system notice after completed prior run must not match active_tool_loop")
 	}
 
 	historicalUnmatchedCall := ConversationFacts{

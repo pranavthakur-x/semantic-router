@@ -336,7 +336,6 @@ func extractIntentConversationHistory(messages []IntentMessage, toolDefinitionCo
 			ToolDefinitionCount: toolDefinitionCount,
 		},
 	}
-	previousWasToolResult := false
 
 	for _, msg := range messages {
 		role := strings.ToLower(strings.TrimSpace(msg.Role))
@@ -355,12 +354,11 @@ func extractIntentConversationHistory(messages []IntentMessage, toolDefinitionCo
 				history.inputModality.TextContentCount++
 			}
 		}
-		previousWasToolResult = observeIntentConversationMessage(
+		observeIntentConversationMessage(
 			&history.conversationFacts,
 			role,
 			len(msg.ToolCalls),
 			msg.ToolCallID,
-			previousWasToolResult,
 		)
 		if recordIntentUserMessage(&history, role, text, msg.Content) {
 			continue
@@ -376,13 +374,17 @@ func observeIntentConversationMessage(
 	role string,
 	toolCallCount int,
 	toolCallID string,
-	previousWasToolResult bool,
-) bool {
+) {
+	previousWasToolResult := facts.LastMessageToolResult ||
+		facts.LastMessageRole == "tool" ||
+		facts.LastSystemAfterToolResult
+	previousWasUserAfterTool := facts.LastUserAfterToolResult
 	facts.LastMessageRole = role
 	facts.LastMessageToolResult = false
 	facts.LastMessageFlowToolResult = false
 	facts.LastAssistantToolCall = false
 	facts.LastUserAfterToolResult = false
+	facts.LastSystemAfterToolResult = false
 	switch role {
 	case "user":
 		facts.UserMessageCount++
@@ -393,15 +395,18 @@ func observeIntentConversationMessage(
 		facts.LastAssistantToolCall = toolCallCount > 0
 	case "system":
 		facts.SystemMessageCount++
+		facts.LastSystemAfterToolResult = previousWasToolResult
+		facts.LastUserAfterToolResult = previousWasUserAfterTool
 	case "developer":
 		facts.HasDeveloperMessage = true
+		facts.LastSystemAfterToolResult = previousWasToolResult
+		facts.LastUserAfterToolResult = previousWasUserAfterTool
 	case "tool":
 		facts.ToolMessageCount++
 		facts.ToolResultCount++
 		facts.LastMessageToolResult = true
 		facts.LastMessageFlowToolResult = looper.IsWorkflowToolCallID(toolCallID)
 	}
-	return facts.LastMessageToolResult
 }
 
 func recordIntentUserMessage(

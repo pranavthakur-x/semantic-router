@@ -44,6 +44,7 @@ type requestSignalSnapshot struct {
 	LastMessageFlowToolResult bool
 	LastAssistantToolCall     bool
 	LastUserAfterToolResult   bool
+	LastSystemAfterToolResult bool
 }
 
 func recordNonUserSignalMessage(result *requestSignalSnapshot, role string, text string) {

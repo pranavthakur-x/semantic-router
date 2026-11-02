@@ -521,6 +521,37 @@ func TestBuildSelectionContextMarksUserAfterToolResultAsToolLoop(t *testing.T) {
 	}
 }
 
+func TestBuildSelectionContextMarksSystemAfterToolResultAsToolLoop(t *testing.T) {
+	router := &OpenAIRouter{Config: &config.RouterConfig{}}
+	reqCtx := &RequestContext{
+		SessionID:     "claude-code-tool-continuation",
+		PreviousModel: "model-a",
+		VSRConversationFacts: classification.ConversationFacts{
+			AssistantToolCallCount:    1,
+			ToolResultCount:           1,
+			LastMessageRole:           "system",
+			LastSystemAfterToolResult: true,
+		},
+	}
+
+	selCtx := router.buildSelectionContext(
+		[]config.ModelRef{{Model: "model-a"}, {Model: "model-b"}},
+		"agentic",
+		"continue after tool output",
+		nil,
+		"",
+		nil,
+		reqCtx,
+	)
+
+	if selCtx.AgenticSession == nil || !selCtx.AgenticSession.ActiveToolLoop {
+		t.Fatalf("expected system-after-tool continuation to be an active tool loop: %#v", selCtx.AgenticSession)
+	}
+	if selCtx.AgenticSession.Phase != selection.AgenticPhaseToolLoop {
+		t.Fatalf("expected tool-loop phase, got %q", selCtx.AgenticSession.Phase)
+	}
+}
+
 func TestBuildSelectionContextMarksPreviousResponseIDAsNonPortableContext(t *testing.T) {
 	router := &OpenAIRouter{Config: &config.RouterConfig{}}
 	reqCtx := &RequestContext{
